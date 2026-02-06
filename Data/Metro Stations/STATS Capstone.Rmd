@@ -1,5 +1,5 @@
 ---
-title: "STAT Capstone"
+title: "Adding transfer and ground level"
 author: "Isaac Damon"
 date: "`r Sys.Date()`"
 output: html_document

@@ -1,0 +1,26 @@
+---
+title: "Crime Distance to Metro"
+author: "Isaac Damon"
+date: '`r Sys.Date()`'
+output: html_document
+---
+
+```{r read}
+knitr::opts_chunk$set(echo = TRUE)
+metros <- read_sf("Metros_Ground_Transfer.geojson")
+crimes <- read_sf("Crime_Incidents_in_2025.geojson")
+
+
+metro_point <- st_transform(metros$geometry, 3857)
+crimes_point <- st_transform(crimes$geometry, 3857)
+nearest <- st_nearest_feature(crimes_point, metro_point)
+
+crimes$distance_eu <- st_distance(
+  crimes_point,
+  metro_point[nearest, ],
+  by_element = TRUE)
+
+crimes$distance_ma <- abs(st_coordinates(crimes_point)[ , 2] - st_coordinates(metro_point)[nearest, 2]) +
+  abs(st_coordinates(crimes_point)[ , 1] - st_coordinates(metro_point)[nearest, 1])
+st_write(crimes, "Crime_Distance_to_Metros.geoJson", append = FALSE)
+```

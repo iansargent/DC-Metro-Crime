@@ -1,0 +1,108 @@
+---
+title: "Combined Capstone Data Cleaning"
+author: "Ian Sargent"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Packages
+```{r}
+pacman::p_load(tidyverse, sf)
+```
+
+
+### Load Datasets
+```{r}
+census <- read.csv("https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Census/Census_ACS.csv") |> 
+  st_as_sf(crs = 4326, wkt = "WKT") |>
+  st_transform(3857)
+
+crime <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Crime/Crime_Incidents_in_2025.geojson")
+
+metro <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Metro/Metros_Ground_Transfer.geoJson")
+```
+
+## 1. 2025 Crime Incidents
+
+### Classify Crimes as Violent or Property
+
+In accordance with the FBI's Uniform Crime Reporting (UCR) standards, we have classified homicide, assault with a dangerous weapon, sexual abuse, and robbery as violent offenses. Property offenses include theft from automotive, burglary, motor vehicle theft, arson, and general theft. 
+
+```{r}
+# A vector of violent crimes 
+violent <- c("HOMICIDE", "ASSAULT W/DANGEROUS WEAPON", "SEX ABUSE", "ROBBERY")
+
+# Creating the crime_type column (violent vs property)
+crime <- 
+  crime |> 
+  mutate(crime_type = if_else(OFFENSE %in% violent, "violent", "property"))
+```
+
+### Classify Crimes as Automotive Related
+
+```{r}
+# A vector of violent crimes 
+auto <- c("THEFT F/AUTO", "MOTOR VEHICLE THEFT")
+
+# Creating the crime_type column (violent vs property)
+crime <- 
+  crime |> 
+  mutate(auto_crime = if_else(OFFENSE %in% auto, 1, 0))
+```
+
+## 2. Distance to Nearest Stations
+
+```{r}
+# Ensuring same map projection for distance calculations
+crime <- st_transform(crime, 3857)
+metro <- st_transform(metro, 3857)
+```
+
+
+### Adding Nearest Station and Distance (Meters)
+
+```{r}
+crime$nearest_station <- st_nearest_feature(crime, metro)
+crime$distance_meters <- as.numeric(st_distance(crime, metro[crime$nearest_station,], by_element=TRUE))
+```
+
+
+## 3. Joining Crime and Metro Datasets
+```{r}
+# Join crime and metro by unique nearest station ID
+crime_joined <- crime |>
+  mutate(nearest_station_id = metro$OBJECTID[nearest_station]) |>
+  left_join(
+    metro |> 
+      st_drop_geometry() |> 
+      select(OBJECTID, NAME, Above_Ground, Transfer_Station),
+    by = c("nearest_station_id" = "OBJECTID")
+  ) |> 
+  rename("nearest_station_name" = "NAME")
+```
+
+
+## 4. Incorporate Census ACS Controls (By Tract)
+```{r}
+master <- st_join(crime_joined, census)
+```
+
+### Write master dataset to files
+```{r}
+# st_write(master, "master.csv", driver = "CSV", options = c("GEOMETRY=AS_XY"), delete_layer = TRUE)
+# st_write(master, "master.geojson")
+```
+
+
+
+
+
+
+
+
+

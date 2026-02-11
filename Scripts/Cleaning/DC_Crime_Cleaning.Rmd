@@ -94,8 +94,8 @@ master <- st_join(crime_joined, census)
 
 ### Write master dataset to files
 ```{r}
-# st_write(master, "master.csv", driver = "CSV", options = c("GEOMETRY=AS_XY"), delete_layer = TRUE)
-# st_write(master, "master.geojson")
+st_write(master, "master.csv", driver = "CSV", options = c("GEOMETRY=AS_XY"), delete_layer = TRUE)
+st_write(master, "master.geojson")
 ```
 
 

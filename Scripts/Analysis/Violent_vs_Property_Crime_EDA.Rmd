@@ -12,7 +12,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Packages
 ```{r}
-pacman::p_load(tidyverse, sf)
+pacman::p_load(tidyverse, sf, MASS)
 ```
 
 
@@ -45,33 +45,48 @@ crime_by_station
 
 
 ```{r}
-crime_by_station_with_controls <- 
+crime_by_tract <- 
+  df |> 
+  reframe(
+    .by = c(name),
+    # Total Crime
+    total_crime_count = n(),
+    population = mean(as.numeric(total_population)),
+    poverty_rate = mean(as.numeric(poverty_rate)),
+    income = mean(as.numeric(median_household_income)),
+    unemployment_rate = mean(as.numeric(unemployment_rate)),
+    pct_non_hispanic_black = mean(as.numeric(pct_non_hispanic_black)),
+    avg_distance_to_metro = mean(as.numeric(distance_meters))
+  )
+
+crime_by_tract
+```
+
+
+
+```{r}
+crime_distance_by_station <- 
   df |> 
   reframe(
     .by = c(nearest_station_name),
     # Total Crime
     total_crime_count = n(),
-    tract = NAME,
-    # Census Control Variables
-    poverty_rate = as.numeric(poverty_rate),
-    population = as.numeric(total_population),
-    pct_non_hispanic_black = as.numeric(pct_non_hispanic_black),
-    # Count Specific Crime Types
-    violent_count  = sum(crime_type == "violent",  na.rm = TRUE),
-    property_count = sum(crime_type == "property", na.rm = TRUE)
+    avg_distance = mean(as.numeric(distance_meters))
   ) |> 
-  mutate(
-    # Calculate percentages based on the columns we just created
-    pct_violent  = (violent_count / total_crime_count) * 100,
-    pct_property = (property_count / total_crime_count) * 100,
-    poverty_rate = poverty_rate * 100,
-    pct_non_hispanic_black = pct_non_hispanic_black * 100
-  ) |> 
-  arrange(tract)
-
-crime_by_station_with_controls
+  arrange(-avg_distance)
 ```
 
 
+### Negative Binomial Regression
+```{r}
+model_simple <- glm.nb(formula = total_crime_count ~ avg_distance_to_metro + offset(log(population)), data=crime_by_tract)
+
+model_comp <- glm.nb(formula = total_crime_count ~ avg_distance_to_metro + offset(log(population)) + poverty_rate + income + unemployment_rate + pct_non_hispanic_black, data=crime_by_tract)
+```
+
+
+```{r}
+summary(model_comp)
+```
 
 

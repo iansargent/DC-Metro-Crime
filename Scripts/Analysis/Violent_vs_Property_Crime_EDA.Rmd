@@ -1,0 +1,77 @@
+---
+title: "Violent_Property_Crime_EDA"
+author: "Ian Sargent"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+### Packages
+```{r}
+pacman::p_load(tidyverse, sf)
+```
+
+
+### Read the Dataset
+```{r}
+df <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Combined/master.csv")
+```
+
+
+### Aggregate Specific Crime Counts by Metro Station
+```{r}
+crime_by_station <- df |> 
+  summarize(
+    .by = nearest_station_name,
+    # Total crime
+    total_crime_count = n(),
+    # Count specific crime types
+    violent_count  = sum(crime_type == "violent",  na.rm = TRUE),
+    property_count = sum(crime_type == "property", na.rm = TRUE)
+  ) |> 
+  mutate(
+    # Calculate percentages based on the columns we just created
+    pct_violent  = (violent_count / total_crime_count) * 100,
+    pct_property = (property_count / total_crime_count) * 100
+  ) |> 
+  arrange(nearest_station_name)
+
+crime_by_station
+```
+
+
+```{r}
+crime_by_station_with_controls <- 
+  df |> 
+  reframe(
+    .by = c(nearest_station_name),
+    # Total Crime
+    total_crime_count = n(),
+    tract = NAME,
+    # Census Control Variables
+    poverty_rate = as.numeric(poverty_rate),
+    population = as.numeric(total_population),
+    pct_non_hispanic_black = as.numeric(pct_non_hispanic_black),
+    # Count Specific Crime Types
+    violent_count  = sum(crime_type == "violent",  na.rm = TRUE),
+    property_count = sum(crime_type == "property", na.rm = TRUE)
+  ) |> 
+  mutate(
+    # Calculate percentages based on the columns we just created
+    pct_violent  = (violent_count / total_crime_count) * 100,
+    pct_property = (property_count / total_crime_count) * 100,
+    poverty_rate = poverty_rate * 100,
+    pct_non_hispanic_black = pct_non_hispanic_black * 100
+  ) |> 
+  arrange(tract)
+
+crime_by_station_with_controls
+```
+
+
+
+

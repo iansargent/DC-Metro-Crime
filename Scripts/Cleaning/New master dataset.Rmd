@@ -33,14 +33,14 @@ crime_files <- tibble::tibble(
   year = c(2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025),
   url = c(
     "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2017.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2018.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2019.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2020.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2021.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2022.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2023.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2024.geojson",
-  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Crime/Crime_Incidents_in_2025.geojson"
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2018.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2019.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2020.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2021.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2022.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2023.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2024.geojson",
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Crime/Crime_Incidents_in_2025.geojson"
   )
 )
 ```
@@ -152,9 +152,9 @@ crime_joined <- crime |>
 
 ## 4. Incorporate Census ACS Controls (By Tract)
 ```{r}
-master_df <- 
-  st_join(crime_joined, census) |> 
-  janitor::clean_names() 
+master_df <-
+  st_join(crime_joined, census) |>
+  janitor::clean_names()
 ```
 
 
@@ -166,11 +166,10 @@ master_df <- st_read("master.geojson")
 
 ```{r}
 names(master_df)
-
 ```
 
 ```{r}
-#Setting date format to create new seasonality variable
+# Setting date format to create new seasonality variable
 master_df$start_date <- ymd_hms(master_df$report_date)
 ```
 
@@ -185,9 +184,9 @@ master_df <- master_df %>%
     ),
     # 2) Create season from month
     season = case_when(
-      month(start_date_parsed) %in% c(12, 1, 2)  ~ "Winter",
-      month(start_date_parsed) %in% c(3, 4, 5)   ~ "Spring",
-      month(start_date_parsed) %in% c(6, 7, 8)   ~ "Summer",
+      month(start_date_parsed) %in% c(12, 1, 2) ~ "Winter",
+      month(start_date_parsed) %in% c(3, 4, 5) ~ "Spring",
+      month(start_date_parsed) %in% c(6, 7, 8) ~ "Summer",
       month(start_date_parsed) %in% c(9, 10, 11) ~ "Fall",
       TRUE ~ NA_character_
     ),

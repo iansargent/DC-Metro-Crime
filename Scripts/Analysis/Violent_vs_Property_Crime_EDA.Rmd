@@ -9,84 +9,203 @@ output: html_document
 knitr::opts_chunk$set(echo = TRUE)
 ```
 
-
 ### Packages
 ```{r}
-pacman::p_load(tidyverse, sf, MASS)
+pacman::p_load(tidyverse, sf, MASS, vdc)
 ```
-
 
 ### Read the Dataset
 ```{r}
-df <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Combined/master.csv")
+# Read from GitHub Repository
+df <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Combined/master.geojson")
+
+census <- read.csv("https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Census/Census_ACS.csv") |>
+  st_as_sf(crs = 4326, wkt = "WKT") |>
+  st_transform(3857) |> 
+  arrange(by = NAME)
+
+metro <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Metro/Metros_Ground_Transfer.geoJson")
 ```
 
+# Do violent and property crime rates vary differently as a function of transit accessibility across census tracts in Washington, DC?
 
-### Aggregate Specific Crime Counts by Metro Station
+### Aggregate Specific Crime Counts by Census Tract
 ```{r}
-crime_by_station <- df |> 
+
+crime_by_tract <- df |>
+  st_drop_geometry() |>
   summarize(
-    .by = nearest_station_name,
-    # Total crime
-    total_crime_count = n(),
-    # Count specific crime types
-    violent_count  = sum(crime_type == "violent",  na.rm = TRUE),
-    property_count = sum(crime_type == "property", na.rm = TRUE)
+    .by = name,
+    violent  = sum(crime_type == "violent",  na.rm = TRUE),
+    property = sum(crime_type == "property", na.rm = TRUE),
+    population = mean(as.numeric(total_population))
+  ) |>
+  pivot_longer(
+    cols = c(violent, property),
+    names_to = "crime_type",
+    values_to = "count"
   ) |> 
-  mutate(
-    # Calculate percentages based on the columns we just created
-    pct_violent  = (violent_count / total_crime_count) * 100,
-    pct_property = (property_count / total_crime_count) * 100
-  ) |> 
-  arrange(nearest_station_name)
+  arrange(by=name)
 
-crime_by_station
-```
-
-
-```{r}
-crime_by_tract <- 
-  df |> 
-  reframe(
-    .by = c(name),
-    # Total Crime
-    total_crime_count = n(),
-    population = mean(as.numeric(total_population)),
-    poverty_rate = mean(as.numeric(poverty_rate)),
-    income = mean(as.numeric(median_household_income)),
-    unemployment_rate = mean(as.numeric(unemployment_rate)),
-    pct_non_hispanic_black = mean(as.numeric(pct_non_hispanic_black)),
-    avg_distance_to_metro = mean(as.numeric(distance_meters))
-  )
+crime_by_tract <- crime_by_tract |>
+  left_join(
+    census |> dplyr::select(NAME, WKT),
+    by = c("name" = "NAME")
+  ) |>
+  arrange(by=name) |> 
+  rename("geometry" = "WKT") |> 
+  st_as_sf()
 
 crime_by_tract
 ```
 
 
-
+### Count of Metro Stations within a 1000 meter buffer
 ```{r}
-crime_distance_by_station <- 
-  df |> 
-  reframe(
-    .by = c(nearest_station_name),
-    # Total Crime
-    total_crime_count = n(),
-    avg_distance = mean(as.numeric(distance_meters))
+# 1. Centroids
+census$centroid <- st_centroid(census$WKT)
+centroids <- census |> st_set_geometry("centroid") |> st_transform(3857)
+
+# 2. 1000m buffer
+centroids$buffer_1000m <- st_buffer(centroids$WKT, 1000)
+
+# 3. Count stations inside buffer
+inter_buffer <- st_intersects(centroids$buffer_1000m, metro |> st_transform(3857))
+centroids$stations_within_1000m <- lengths(inter_buffer)
+
+# 4. Merge back to crime_by_tract
+crime_by_tract <- crime_by_tract |>
+  left_join(
+    centroids |> st_drop_geometry() |> dplyr::select(NAME, stations_within_1000m),
+    by = c("name" = "NAME")
   ) |> 
-  arrange(-avg_distance)
+  st_drop_geometry() |> 
+  merge(census, by.x="name", by.y="NAME") |> 
+  distinct()
 ```
 
 
-### Negative Binomial Regression
-```{r}
-model_simple <- glm.nb(formula = total_crime_count ~ avg_distance_to_metro + offset(log(population)), data=crime_by_tract)
+### Variable Distributions
+```{r, warning=FALSE}
+crime_by_tract |> 
+  ggplot(
+    mapping = aes(
+      x = population
+    )
+  ) +
+  geom_histogram(bins=30, aes(y=..density..), fill="steelblue", color="white") +
+  geom_density(color="darkblue") +
+  theme_minimal() +
+  labs(
+    title = "Census Tract Population Distribution",
+    x = "Population",
+    y = "Density"
+  )
+```
 
-model_comp <- glm.nb(formula = total_crime_count ~ avg_distance_to_metro + offset(log(population)) + poverty_rate + income + unemployment_rate + pct_non_hispanic_black, data=crime_by_tract)
+
+```{r, warning=FALSE}
+crime_by_tract |>
+  filter(crime_type == "violent") |> 
+  ggplot(
+    mapping = aes(
+      x = count
+    )
+  ) +
+  geom_histogram(bins=30, aes(y=..density..), fill="mediumseagreen", color="white") +
+  geom_density(color="darkgreen") +
+  theme_minimal() +
+  labs(
+    title = "Census Tract Violent Crime Count Distribution",
+    x = "Violent Crimes",
+    y = "Density"
+  )
+```
+
+```{r, warning=FALSE}
+crime_by_tract |>
+  filter(crime_type == "property") |> 
+  ggplot(
+    mapping = aes(
+      x = count
+    )
+  ) +
+  geom_histogram(bins=30, aes(y=..density..), fill="salmon", color="white") +
+  geom_density(color="darkred") +
+  theme_minimal() +
+  labs(
+    title = "Census Tract Property Crime Count Distribution",
+    x = "Property Crimes",
+    y = "Density"
+  )
+```
+
+
+```{r, warning=FALSE}
+crime_by_tract |>
+  ggplot(
+    mapping = aes(
+      x = stations_within_1000m
+    )
+  ) +
+  geom_histogram(bins=17, aes(y=..density..), fill="mediumpurple", color="white") +
+  geom_density(color="darkslateblue") +
+  theme_minimal() +
+  labs(
+    title = "Census Tract Property Crime Count Distribution",
+    x = "Property Crimes",
+    y = "Density"
+  )
+```
+
+
+```{r, warning=FALSE}
+crime_by_tract |>
+  filter(crime_type == "property") |> 
+  ggplot(
+    mapping = aes(
+      x = stations_within_1000m,
+      y = count,
+    )
+  ) + 
+  geom_point(
+    color = "mediumseagreen",
+    size = 2
+  ) + 
+  geom_smooth(
+    formula = y~x,
+    method = "lm",
+    se=FALSE
+  ) +
+  theme_minimal() + 
+  labs(
+    title = "Count of Stations Within 1000m and Property Crime Counts",
+    x = "Stations Within 1000m of Area",
+    y = "Property Crimes",
+    
+  )
 ```
 
 
 ```{r}
-summary(model_comp)
+# Violent crime
+nb_violent_offset <- glm.nb(
+  count ~ median_household_income + stations_within_1000m + unemployment_rate + pct_non_hispanic_black + offset(log(total_population)),
+  data = filter(crime_by_tract, crime_type == "violent")
+)
+
+summary(nb_violent_offset)
+```
+
+
+```{r}
+# Property crime
+nb_property_offset <- glm.nb(
+  count ~ stations_within_1000m + median_household_income + unemployment_rate + pct_non_hispanic_black + offset(log(total_population)),
+  data = filter(crime_by_tract, crime_type == "property")
+)
+
+summary(nb_property_offset)
 ```
 
 

@@ -1,0 +1,202 @@
+---
+title: "New combined data"
+author: "David McLone"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r}
+library(pacman)
+```
+
+```{r}
+library(janitor)
+```
+
+```{r}
+library(dplyr)
+library(lubridate)
+```
+
+
+### Packages
+```{r}
+pacman::p_load(tidyverse, sf)
+```
+
+```{r}
+crime_files <- tibble::tibble(
+  year = c(2017, 2018, 2019, 2020, 2021, 2022, 2023, 2024, 2025),
+  url = c(
+    "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2017.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2018.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2019.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2020.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2021.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2022.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2023.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_2024.geojson",
+  "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Crime/Crime_Incidents_in_2025.geojson"
+  )
+)
+```
+
+```{r}
+crime_list <- purrr::map2(crime_files$year, crime_files$url, \(yr, u) {
+  x <- st_read(u, quiet = TRUE)
+  x$year <- yr
+  x
+})
+
+crime <- dplyr::bind_rows(crime_list)
+```
+
+```{r}
+table(crime$year)
+```
+
+
+### Load Datasets
+```{r}
+census <- read.csv("https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Census/Census_ACS.csv") |>
+  st_as_sf(crs = 4326, wkt = "WKT") |>
+  st_transform(3857)
+
+metro <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Metro/Metros_Ground_Transfer.geoJson")
+```
+
+## 1. 2025 Crime Incidents
+
+### Classify Crimes as Violent or Property
+
+In accordance with the FBI's Uniform Crime Reporting (UCR) standards, we have classified homicide, assault with a dangerous weapon, sexual abuse, and robbery as violent offenses. Property offenses include theft from automotive, burglary, motor vehicle theft, arson, and general theft. 
+
+```{r}
+# A vector of violent crimes
+violent <- c("HOMICIDE", "ASSAULT W/DANGEROUS WEAPON", "SEX ABUSE", "ROBBERY")
+
+# Creating the crime_type column (violent vs property)
+crime <-
+  crime |>
+  mutate(crime_type = if_else(OFFENSE %in% violent, "violent", "property"))
+```
+
+### Classify Crimes as Automotive Related
+
+```{r}
+# A vector of violent crimes
+auto <- c("THEFT F/AUTO", "MOTOR VEHICLE THEFT")
+
+# Creating the crime_type column (violent vs property)
+crime <-
+  crime |>
+  mutate(auto_crime = if_else(OFFENSE %in% auto, 1, 0))
+```
+
+## 2. Distance to Nearest Stations
+
+```{r}
+# Ensuring same map projection for distance calculations
+crime <- st_transform(crime, 3857)
+metro <- st_transform(metro, 3857)
+census <- st_transform(census, 3857)
+```
+
+
+### Adding Nearest Station and Distance (Meters)
+```{r}
+crime$nearest_station <- st_nearest_feature(crime, metro)
+crime$distance_meters <- as.numeric(st_distance(crime, metro[crime$nearest_station, ], by_element = TRUE))
+
+crime_coords <- st_coordinates(crime)
+metro_coords <- st_coordinates(metro)
+
+crime$distance_manhattan <-
+  abs(crime_coords[, 1] - metro_coords[crime$nearest_station, 1]) +
+  abs(crime_coords[, 2] - metro_coords[crime$nearest_station, 2])
+```
+
+
+```{r}
+tract_centroids <- census |> st_centroid()
+dist_matrix <- st_distance(tract_centroids, metro)
+nearest_dist <- apply(dist_matrix, 1, min)
+tract_centroids$tract_dist_to_metro <- as.numeric(nearest_dist)
+```
+
+```{r}
+census <- census |>
+  mutate(tract_dist_to_metro = as.numeric(nearest_dist))
+```
+
+
+
+## 3. Joining Crime and Metro Datasets
+```{r}
+# Join crime and metro by unique nearest station ID
+crime_joined <- crime |>
+  rename("nearest_station_id" = "nearest_station") |>
+  left_join(
+    metro |>
+      st_drop_geometry() |>
+      dplyr::select(OBJECTID, NAME, Above_Ground, Transfer_Station),
+    by = c("nearest_station_id" = "OBJECTID")
+  ) |>
+  rename("nearest_station_name" = "NAME")
+```
+
+
+## 4. Incorporate Census ACS Controls (By Tract)
+```{r}
+master_df <- 
+  st_join(crime_joined, census) |> 
+  janitor::clean_names() 
+```
+
+
+### Write master dataset to files
+```{r}
+st_write(master_df, "master.geojson", delete_dsn = TRUE)
+master_df <- st_read("master.geojson")
+```
+
+```{r}
+names(master_df)
+
+```
+
+```{r}
+#Setting date format to create new seasonality variable
+master_df$start_date <- ymd_hms(master_df$report_date)
+```
+
+```{r}
+# 1) Parse the date-time column (try common formats)
+master_df <- master_df %>%
+  mutate(
+    start_date_parsed = parse_date_time(
+      start_date,
+      orders = c("Ymd HMS", "Ymd HM", "Ymd", "mdY HMS", "mdY HM", "mdY"),
+      tz = "America/New_York"
+    ),
+    # 2) Create season from month
+    season = case_when(
+      month(start_date_parsed) %in% c(12, 1, 2)  ~ "Winter",
+      month(start_date_parsed) %in% c(3, 4, 5)   ~ "Spring",
+      month(start_date_parsed) %in% c(6, 7, 8)   ~ "Summer",
+      month(start_date_parsed) %in% c(9, 10, 11) ~ "Fall",
+      TRUE ~ NA_character_
+    ),
+    season = factor(season, levels = c("Winter", "Spring", "Summer", "Fall"))
+  )
+
+table(master_df$season, useNA = "ifany")
+```
+
+```{r}
+View(master_df)
+```

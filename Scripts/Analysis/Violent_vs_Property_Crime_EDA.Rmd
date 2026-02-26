@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Packages
 ```{r}
-pacman::p_load(tidyverse, sf, MASS, vdc)
+pacman::p_load(tidyverse, sf, MASS, vdc, GGally, rcrimeanalysis)
 ```
 
 ### Read the Dataset
@@ -86,6 +86,8 @@ crime_by_tract <- crime_by_tract |>
 
 
 ### Variable Distributions
+
+#### Population
 ```{r, warning=FALSE}
 crime_by_tract |> 
   ggplot(
@@ -104,6 +106,7 @@ crime_by_tract |>
 ```
 
 
+#### Violent Crimes
 ```{r, warning=FALSE}
 crime_by_tract |>
   filter(crime_type == "violent") |> 
@@ -122,6 +125,8 @@ crime_by_tract |>
   )
 ```
 
+
+#### Property Crimes
 ```{r, warning=FALSE}
 crime_by_tract |>
   filter(crime_type == "property") |> 
@@ -141,6 +146,7 @@ crime_by_tract |>
 ```
 
 
+#### Stations within 1000m
 ```{r, warning=FALSE}
 crime_by_tract |>
   ggplot(
@@ -152,38 +158,17 @@ crime_by_tract |>
   geom_density(color="darkslateblue") +
   theme_minimal() +
   labs(
-    title = "Census Tract Property Crime Count Distribution",
-    x = "Property Crimes",
+    title = "Census Tract Stations Distribution",
+    x = "Number of Stations within 1000m",
     y = "Density"
   )
 ```
 
 
 ```{r, warning=FALSE}
-crime_by_tract |>
-  filter(crime_type == "property") |> 
-  ggplot(
-    mapping = aes(
-      x = stations_within_1000m,
-      y = count,
-    )
-  ) + 
-  geom_point(
-    color = "mediumseagreen",
-    size = 2
-  ) + 
-  geom_smooth(
-    formula = y~x,
-    method = "lm",
-    se=FALSE
-  ) +
-  theme_minimal() + 
-  labs(
-    title = "Count of Stations Within 1000m and Property Crime Counts",
-    x = "Stations Within 1000m of Area",
-    y = "Property Crimes",
-    
-  )
+crime_by_tract |> 
+  dplyr::select(count, stations_within_1000m, total_population, total_housing_units, median_household_income, poverty_rate, unemployment_rate, pct_bachelors_or_higher) |> 
+ggpairs()
 ```
 
 
@@ -208,4 +193,8 @@ nb_property_offset <- glm.nb(
 summary(nb_property_offset)
 ```
 
+```{r}
+
+
+```
 

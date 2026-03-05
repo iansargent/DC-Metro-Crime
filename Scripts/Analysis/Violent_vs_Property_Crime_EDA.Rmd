@@ -11,7 +11,7 @@ knitr::opts_chunk$set(echo = TRUE)
 
 ### Packages
 ```{r}
-pacman::p_load(tidyverse, sf, MASS, vdc, GGally, rcrimeanalysis)
+pacman::p_load(tidyverse, sf, MASS, vdc, GGally, units)
 ```
 
 ### Read the Dataset
@@ -22,6 +22,11 @@ df <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime
 census <- read.csv("https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/fa2bcfffb8245fd5a3573c419787e96b840aff0a/Data/Census/Census_ACS.csv") |>
   st_as_sf(crs = 4326, wkt = "WKT") |>
   st_transform(3857) |> 
+  mutate(
+    sq_miles = st_area(WKT) / 2589988.11,
+    pop_density = total_population / sq_miles
+  ) |> 
+  units::drop_units() |> 
   arrange(by = NAME)
 
 metro <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Metro/Metros_Ground_Transfer.geoJson")
@@ -87,7 +92,7 @@ crime_by_tract <- crime_by_tract |>
 
 ### Variable Distributions
 
-#### Population
+#### Total Population 
 ```{r, warning=FALSE}
 crime_by_tract |> 
   ggplot(
@@ -105,6 +110,24 @@ crime_by_tract |>
   )
 ```
 
+
+#### Population Density
+```{r, warning=FALSE}
+crime_by_tract |> 
+  ggplot(
+    mapping = aes(
+      x = pop_density
+    )
+  ) +
+  geom_histogram(bins=30, aes(y=..density..), fill="steelblue", color="white") +
+  geom_density(color="darkblue") +
+  theme_minimal() +
+  labs(
+    title = "Census Tract Population Distribution",
+    x = "Population Density",
+    y = "Density"
+  )
+```
 
 #### Violent Crimes
 ```{r, warning=FALSE}
@@ -167,7 +190,7 @@ crime_by_tract |>
 
 ```{r, warning=FALSE}
 crime_by_tract |> 
-  dplyr::select(count, stations_within_1000m, total_population, total_housing_units, median_household_income, poverty_rate, unemployment_rate, pct_bachelors_or_higher) |> 
+  dplyr::select(count, stations_within_1000m, total_population, total_housing_units, median_household_income, poverty_rate, unemployment_rate, pct_bachelors_or_higher, pop_density) |> 
 ggpairs()
 ```
 
@@ -175,7 +198,7 @@ ggpairs()
 ```{r}
 # Violent crime
 nb_violent_offset <- glm.nb(
-  count ~ median_household_income + stations_within_1000m + unemployment_rate + pct_non_hispanic_black + offset(log(total_population)),
+  count ~ median_household_income + stations_within_1000m + unemployment_rate + pct_non_hispanic_black + offset(log(total_population)) + total_housing_units + pop_density,
   data = filter(crime_by_tract, crime_type == "violent")
 )
 
@@ -186,7 +209,7 @@ summary(nb_violent_offset)
 ```{r}
 # Property crime
 nb_property_offset <- glm.nb(
-  count ~ stations_within_1000m + median_household_income + unemployment_rate + pct_non_hispanic_black + offset(log(total_population)),
+  count ~ stations_within_1000m + median_household_income + unemployment_rate + pct_non_hispanic_black + offset(log(total_population)) + pop_density,
   data = filter(crime_by_tract, crime_type == "property")
 )
 

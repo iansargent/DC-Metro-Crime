@@ -1,0 +1,298 @@
+---
+title: "Updated DC Crime Data"
+author: "Ian Sargent"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+### Packages
+```{r}
+# Load packages with pacman library
+pacman::p_load(
+  tidyverse, # Data manipulation
+  sf, # Working with simple feature geometries 
+  janitor # Column name cleaning
+)
+```
+
+
+## Loading Datasets
+
+#### Census
+```{r}
+# Loading geospatial census data LOCALLY (Due to size constraints)
+# NOTE: I believe this one is located in our Google Drive "Data" folder
+census <- st_read("Census_ACS_new.geojson") |> 
+  # Put into wide format (Each column = a variable)
+  pivot_wider(
+    id_cols = c(tract, year, geometry),
+    names_from = variable,
+    values_from = estimate
+  ) |> 
+  # Just using years 2020 and later due to tract boundary changes that year
+  filter(year >= 2020) |>
+  # Standardizing "tract" column for joins
+  mutate(tract = str_replace_all(tract, ";", ",")) |>
+  # Creating rate variables (better than raw population counts)
+  mutate(
+    # Race / Ethnicity Variables
+    pct_white        = non_hispanic_white / total_population,
+    pct_black_nh     = non_hispanic_black / total_population,
+    pct_hispanic     = hispanic_latino    / total_population,
+    
+    # Education Variables
+    pct_bachelors_only = bachelors_degree / total_population,
+    pct_graduate       = (masters_degree + professional_degree + doctorate_degree) / total_population,
+    
+    # Socioeconomic Variables
+    pct_poverty      = population_below_poverty / total_population,
+    pct_unemployed   = unemployed_population    / total_population,
+    pct_single_parent = single_parent_households / total_households,
+    
+    # Housing Variables
+    pct_renter       = renter_occupied_units / total_housing_units,
+    pct_vacant       = vacant_units          / total_housing_units,
+    
+    # Log population for offset
+    log_pop          = log(total_population)
+  ) |> 
+  # Dropping raw count variables (We won't need those anymore)
+  dplyr::select(-c(
+    non_hispanic_white, non_hispanic_black, hispanic_latino,
+    bachelors_degree, masters_degree, professional_degree, doctorate_degree,
+    population_below_poverty, unemployed_population,
+    vacant_units, renter_occupied_units, owner_occupied_units,
+    single_parent_households
+  ))
+
+# Ensure the coordinate system is the same (for distance calculations)
+census <- st_transform(census, crs=4326)
+```
+
+
+#### Crime Incidents
+```{r}
+# Load Crime Incident Datasets by Year (2020 - 2024) from GitHub
+years <- 2020:2024
+crime <- map_dfr(years, ~{
+  url <- paste0("https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/main/Data/Crime/Crime_Incidents_in_", .x, ".geojson")
+  st_read(url) |> mutate(year = .x)
+})
+
+# Ensure the coordinate system is the same (for distance calculations)
+crime <- st_transform(crime, crs=4326)
+```
+
+
+#### Metro Stations
+```{r}
+# Load Geospatial DC Metro Stations from GitHub
+metro <- st_read(dsn = "https://raw.githubusercontent.com/iansargent/DC-Metro-Crime/refs/heads/main/Data/Metro/Metros_Ground_Transfer.geoJson") |> 
+  # Select the relevant columns
+  dplyr::select(c(NAME, LINE, ADDRESS, GIS_ID, Above_Ground, Transfer_Station, geometry)) |> 
+  # Standardize column names to lowercase
+  janitor::clean_names()
+
+# Ensure the coordinate system is the same (for distance calculations)
+metro <- st_transform(metro, crs=4326)
+```
+
+
+### Tract Centroids to Nearest Metro Station Distance
+```{r, warning=FALSE} 
+# Define Tract Centroids (using the 2020 boundaries)
+tract_centroids <- st_centroid(census |> filter(year == 2020)) 
+
+# Standardize CRS for distance variables
+tract_centroids <- st_transform(tract_centroids, crs=26918)
+metro_projected <- st_transform(metro, crs=26918)
+
+# Distance from each centroid to all metro stations
+dist_matrix_tracts <- st_distance(tract_centroids, metro_projected)
+
+# Assign nearest station info to tracts
+nearest_idx_tracts <- apply(dist_matrix_tracts, 1, which.min)
+tract_centroids$dist_to_nearest_metro <- apply(dist_matrix_tracts, 1, min)
+tract_centroids$nearest_station_id <- metro_projected$gis_id[nearest_idx_tracts]
+
+# Define Distance Buffer Variables (400m and 800m)
+tract_centroids$stations_within_400m <- rowSums(dist_matrix_tracts <= units::set_units(400, "m"))
+tract_centroids$stations_within_800m <- rowSums(dist_matrix_tracts <= units::set_units(800, "m"))
+
+# Join station attributes with
+tract_proximity_to_metro <- tract_centroids |>
+  st_drop_geometry() |>
+  left_join(st_drop_geometry(metro_projected), by = c("nearest_station_id" = "gis_id")) |>
+  dplyr::select(tract, dist_to_nearest_metro, name, nearest_station_id, stations_within_400m, stations_within_800m, line, above_ground, transfer_station)
+
+glimpse(tract_proximity_to_metro)
+```
+
+
+## Joining Tables
+```{r}
+# Join Crime Incidents With Census (Incidents Within Each Tract)
+tract_crime <- st_join(crime, census, join = st_within)
+
+# Clean the Dataset
+crimes_census <- tract_crime |> 
+  # Remove rows where years don't match up
+  filter(year.x == year.y) |> 
+  filter(!is.na(tract)) |> 
+  # Rename the year column
+  rename("year" = "year.y")|> 
+  # Remove unnecessary variables
+  dplyr::select(-c(BLOCK, BLOCK_GROUP, WARD, ANC, DISTRICT, PSA, VOTING_PRECINCT, BID, OCTO_RECORD_ID, year.x)) |> 
+  # Filter to 2020 and above due to new census tract boundaries
+  filter(year >= 2020) |>
+  # Clean column names to lowercase
+  janitor::clean_names() |> 
+  # Standardize tract column
+  mutate(tract = str_replace_all(tract, ";", ",")) |>
+  # Sort by tract name
+  arrange(tract) |> 
+  left_join(tract_proximity_to_metro, by = "tract")
+```
+
+
+### Distance to Metro Stations
+```{r}
+# Ensure CRS of Combined and Metro Datasets
+metro_proj <- st_transform(metro, crs = 26918)
+
+# Combined Master Dataset
+master <- crimes_census |>
+  left_join(st_drop_geometry(metro_proj), by = c("nearest_station_id" = "gis_id")) |> 
+  dplyr::select(-c(xblock, yblock, objectid, address, census_tract, neighborhood_cluster, line.y, above_ground.y, transfer_station.y, name.y)) |> 
+  mutate(
+    # Extract month variable
+    month = month(report_dat),
+    # Extract season variable
+    season = case_when(
+      month %in% c(12, 1, 2) ~ "Winter",
+      month %in% c(3, 4, 5)  ~ "Spring",
+      month %in% c(6, 7, 8)  ~ "Summer",
+      month %in% c(9, 10, 11) ~ "Fall"),
+    # Metro line dummy variables
+    red_line = as.integer(str_detect(line.x, "red")),
+    green_line = as.integer(str_detect(line.x, "green")),
+    yellow_line = as.integer(str_detect(line.x, "yellow")),
+    blue_line = as.integer(str_detect(line.x, "blue")),
+    orange_line = as.integer(str_detect(line.x, "orange")),
+    silver_line = as.integer(str_detect(line.x, "silver"))
+  ) |> 
+  # Rename columns
+  rename(
+    "line" = "line.x",
+    "transfer_station" = "transfer_station.x",
+    "above_ground" = "above_ground.x",
+    "nearest_station" = "name.x"
+  )
+```
+
+
+
+```{r}
+# Define violent vs property offenses
+violent <- c("HOMICIDE", "ASSAULT W/DANGEROUS WEAPON", "SEX ABUSE", "ROBBERY")
+property <- c("BURGLARY", "THEFT/OTHER", "THEFT F/AUTO", "MOTOR VEHICLE THEFT", "ARSON")
+
+# Aggregate to tract x month x year combinations
+master_new <- master |>
+  st_drop_geometry() |>
+  # Remove missing tract names
+  filter(!is.na(tract)) |>
+  group_by(tract, year, month) |>
+  summarise(
+    # Outcome variables
+    total_crimes   = n(),
+    violent_crimes = sum(offense %in% violent),
+    property_crimes = sum(offense %in% property),
+    
+    # Metro variables
+    dist_to_nearest_metro     = first(dist_to_nearest_metro),
+    stations_within_400m         = first(stations_within_400m),
+    stations_within_800m         = first(stations_within_800m),
+    nearest_station     = first(nearest_station),
+    above_ground        = first(above_ground),
+    transfer_station    = first(transfer_station),
+    red_line            = first(red_line),
+    green_line          = first(green_line),
+    yellow_line         = first(yellow_line),
+    blue_line           = first(blue_line),
+    orange_line         = first(orange_line),
+    silver_line         = first(silver_line),
+    
+    # Census socioeconomic controls (constant within tract-year)
+    total_population         = first(total_population),
+    median_household_income  = first(median_household_income),
+    pct_poverty              = first(pct_poverty),
+    pct_unemployed           = first(pct_unemployed),
+    pct_bachelors_only       = first(pct_bachelors_only),
+    pct_graduate             = first(pct_graduate),
+    total_housing_units      = first(total_housing_units),
+    pct_vacant             = first(pct_vacant),
+    pct_renter    = first(pct_renter),
+    pct_black_nh  = first(pct_black_nh),
+    pct_hispanic      = first(pct_hispanic),
+    .groups = "drop"
+  )
+```
+
+
+### Build Finalized Dataset
+```{r}
+# Create a tract x year x month skeleton
+panel <- expand.grid(
+  tract = unique(tract_proximity_to_metro$tract),
+  year  = 2020:2024,
+  month = 1:12
+) |> as_tibble()
+
+# Census controls
+census_controls <- census |>
+  st_drop_geometry() |>
+  # Select relevant columns
+  dplyr::select(tract, year, total_population, median_household_income,
+                log_pop, starts_with("pct_"))
+
+# Join everything
+nb_data <- panel |>
+  left_join(master_new, by = c("tract", "year", "month")) |>
+  mutate(
+    # If crime count is NA, convert to zero
+    total_crimes    = replace_na(total_crimes, 0),
+    violent_crimes  = replace_na(violent_crimes, 0),
+    property_crimes = replace_na(property_crimes, 0)
+  ) |>
+  # Select relevant columns
+  dplyr::select(tract, year, month, total_crimes, violent_crimes, property_crimes, nearest_station) |>
+  left_join(tract_proximity_to_metro, by = "tract") |>
+  left_join(census_controls |> arrange(tract), by = c("tract", "year")) |>
+  mutate(
+    year      = factor(year),
+    month     = factor(month),
+    red_line    = as.integer(str_detect(tolower(line), "red")),
+    green_line  = as.integer(str_detect(tolower(line), "green")),
+    yellow_line = as.integer(str_detect(tolower(line), "yellow")),
+    blue_line   = as.integer(str_detect(tolower(line), "blue")),
+    orange_line = as.integer(str_detect(tolower(line), "orange")),
+    silver_line = as.integer(str_detect(tolower(line), "silver"))) |> 
+  mutate(
+    blue_orange_silver_line = as.integer(blue_line == 1 | orange_line == 1 | silver_line == 1),
+    green_yellow_line = as.integer(green_line == 1 | yellow_line == 1)
+  )
+```
+
+
+```{r}
+# Write finalized dataset to a CSV file
+# write_csv(nb_data, "nb_data.csv")
+```
+
+
+

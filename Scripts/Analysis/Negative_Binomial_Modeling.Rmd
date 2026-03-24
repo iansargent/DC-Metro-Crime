@@ -22,6 +22,8 @@ pacman::p_load(
   vip, # Variable importance plot for random forest
   glmnet # LASSO regression / regularization (also feature selection)
 )
+
+citation("tidycensus")
 ```
 
 ### Read Data

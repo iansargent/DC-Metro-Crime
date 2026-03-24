@@ -1,0 +1,48 @@
+---
+title: "Shift"
+author: "Isaac Damon"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+pacman::p_load(tidyverse, GGally, dplyr, lubridate)
+master <-  read.csv("master.csv")
+```
+
+
+```{r shift}
+master$hour <- as.numeric(hour(as.POSIXct(ymd_hms(master$start_date),
+  format = "%Y/%m/%d %H:%M:%S%z")))
+master |> 
+  mutate(shift = case_when(hour >= 4  & hour < 12  ~ "morning",
+                            hour >= 12 & hour < 16  ~ "afternoon",
+                            hour >= 16 & hour < 21 ~ "evening",
+                            hour >= 21 | hour == 0 & hour < 24 ~ "early night",
+                            hour >= 1 & hour < 4 ~ "graveyard")) |>
+  group_by(shift, crime_type) |>
+  summarise(crimes = n()) |>
+  ungroup() |>
+  mutate(crimes = case_when(shift == "afternoon" ~ crimes / 4,
+                            shift == "morning" ~ crimes / 8,
+                            shift == "evening" ~ crimes / 5,
+                            shift == "early night" ~ crimes / 4,
+                            shift == "graveyard" ~ crimes / 3),
+         frequency = crimes / sum(crimes)) |>
+  ggplot(mapping = aes(x = fct_relevel(shift, "morning", "afternoon", "evening", "early night", "graveyard"), 
+                       y = frequency,
+                       fill = crime_type)) +
+  geom_col(position = "dodge") +
+  scale_fill_manual(
+    values = c(
+      "property" = "darkgreen",
+      "violent" = "#E31937"),
+    labels = c("property" = "Property",
+                "violent" = "Violent")) +
+  labs(title = "Frequency of when Crimes Occur During the Time of Day by Crime Type",
+       y = "Frequency of Total Crimes",
+       x = "Shift",
+       fill = "Crime Type") +
+  theme_bw()
+```

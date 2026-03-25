@@ -15,7 +15,8 @@ knitr::opts_chunk$set(echo = TRUE)
 pacman::p_load(
   tidyverse, # Data manipulation
   sf, # Working with simple feature geometries 
-  janitor # Column name cleaning
+  janitor, # Column name cleaning
+  table1
 )
 ```
 
@@ -86,6 +87,7 @@ crime <- map_dfr(years, ~{
 # Ensure the coordinate system is the same (for distance calculations)
 crime <- st_transform(crime, crs=4326)
 ```
+
 
 
 #### Metro Stations
@@ -287,14 +289,20 @@ nb_data <- panel |>
     green_yellow_line = as.integer(green_line == 1 | yellow_line == 1)
   )
 
+```
 
 
+```{r}
+# TABLE 1
+table1(~ ., data = nb_data |> dplyr::select(-c(tract, shift, year, total_crimes, nearest_station, name, nearest_station_id, line)),
+       digits = 8,
+       render.continuous = c(. = "Mean (SD)[min, max]"))
 ```
 
 
 ```{r}
 # Write finalized dataset to a CSV file
-# write_csv(nb_data, "nb_data.csv")
+# write_csv(nb_data, "nb_data_by_shift.csv")
 ```
 
 

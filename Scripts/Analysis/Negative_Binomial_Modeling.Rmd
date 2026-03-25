@@ -23,7 +23,6 @@ pacman::p_load(
   glmnet # LASSO regression / regularization (also feature selection)
 )
 
-citation("tidycensus")
 ```
 
 ### Read Data
@@ -197,7 +196,7 @@ nb_property_continuous <- fixest::fenegbin(
     median_household_income + pct_poverty + pct_unemployed +
     pct_black_nh + pct_hispanic + pct_renter + pct_vacant +
     pct_bachelors_only + offset(log_pop) |
-    factor(year) + factor(month),
+    factor(year) + factor(shift),
   vcov = "hetero",
   data = nb_data
 )
@@ -209,7 +208,7 @@ nb_property_buffers <- fixest::fenegbin(
     median_household_income + pct_poverty + pct_unemployed +
     pct_black_nh + pct_hispanic + pct_renter + pct_vacant +
     pct_bachelors_only + offset(log_pop) |
-    factor(year) + factor(month),
+    factor(year) + factor(shift),
   vcov = "hetero",
   data = nb_data
 )
@@ -222,7 +221,7 @@ nb_property <- fixest::fenegbin(
     median_household_income + pct_poverty + pct_unemployed +
     pct_black_nh + pct_hispanic + pct_renter + pct_vacant +
     pct_bachelors_only + offset(log_pop) |
-    factor(year) + factor(month),
+    factor(year) + factor(shift),
   vcov = "hetero",
   data = nb_data
 )

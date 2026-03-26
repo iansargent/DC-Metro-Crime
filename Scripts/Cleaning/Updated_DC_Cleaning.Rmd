@@ -15,7 +15,8 @@ knitr::opts_chunk$set(echo = TRUE)
 pacman::p_load(
   tidyverse, # Data manipulation
   sf, # Working with simple feature geometries 
-  janitor # Column name cleaning
+  janitor, # Column name cleaning
+  table1
 )
 ```
 
@@ -86,6 +87,7 @@ crime <- map_dfr(years, ~{
 # Ensure the coordinate system is the same (for distance calculations)
 crime <- st_transform(crime, crs=4326)
 ```
+
 
 
 #### Metro Stations
@@ -206,7 +208,7 @@ master_new <- master |>
   st_drop_geometry() |>
   # Remove missing tract names
   filter(!is.na(tract)) |>
-  group_by(tract, year, month) |>
+  group_by(tract, year, shift) |>
   summarise(
     # Outcome variables
     total_crimes   = n(),
@@ -246,11 +248,11 @@ master_new <- master |>
 
 ### Build Finalized Dataset
 ```{r}
-# Create a tract x year x month skeleton
+# Create a tract x year x shift skeleton
 panel <- expand.grid(
   tract = unique(tract_proximity_to_metro$tract),
   year  = 2020:2024,
-  month = 1:12
+  shift = unique(master$shift)
 ) |> as_tibble()
 
 # Census controls
@@ -262,7 +264,7 @@ census_controls <- census |>
 
 # Join everything
 nb_data <- panel |>
-  left_join(master_new, by = c("tract", "year", "month")) |>
+  left_join(master_new, by = c("tract", "year", "shift")) |>
   mutate(
     # If crime count is NA, convert to zero
     total_crimes    = replace_na(total_crimes, 0),
@@ -270,12 +272,12 @@ nb_data <- panel |>
     property_crimes = replace_na(property_crimes, 0)
   ) |>
   # Select relevant columns
-  dplyr::select(tract, year, month, total_crimes, violent_crimes, property_crimes, nearest_station) |>
+  dplyr::select(tract, year, shift, total_crimes, violent_crimes, property_crimes, nearest_station) |>
   left_join(tract_proximity_to_metro, by = "tract") |>
   left_join(census_controls |> arrange(tract), by = c("tract", "year")) |>
   mutate(
     year      = factor(year),
-    month     = factor(month),
+    shift     = factor(shift),
     red_line    = as.integer(str_detect(tolower(line), "red")),
     green_line  = as.integer(str_detect(tolower(line), "green")),
     yellow_line = as.integer(str_detect(tolower(line), "yellow")),
@@ -286,12 +288,21 @@ nb_data <- panel |>
     blue_orange_silver_line = as.integer(blue_line == 1 | orange_line == 1 | silver_line == 1),
     green_yellow_line = as.integer(green_line == 1 | yellow_line == 1)
   )
+
+```
+
+
+```{r}
+# TABLE 1
+table1(~ ., data = nb_data |> dplyr::select(-c(tract, shift, year, total_crimes, nearest_station, name, nearest_station_id, line)),
+       digits = 8,
+       render.continuous = c(. = "Mean (SD)[min, max]"))
 ```
 
 
 ```{r}
 # Write finalized dataset to a CSV file
-# write_csv(nb_data, "nb_data.csv")
+# write_csv(nb_data, "nb_data_by_shift.csv")
 ```
 
 

@@ -208,7 +208,7 @@ master_new <- master |>
   st_drop_geometry() |>
   # Remove missing tract names
   filter(!is.na(tract)) |>
-  group_by(tract, year, shift) |>
+  group_by(tract, year, month) |>
   summarise(
     # Outcome variables
     total_crimes   = n(),
@@ -248,11 +248,11 @@ master_new <- master |>
 
 ### Build Finalized Dataset
 ```{r}
-# Create a tract x year x shift skeleton
+# Create a tract x year x month skeleton
 panel <- expand.grid(
   tract = unique(tract_proximity_to_metro$tract),
   year  = 2020:2024,
-  shift = unique(master$shift)
+  month = unique(master$month)
 ) |> as_tibble()
 
 # Census controls
@@ -264,7 +264,7 @@ census_controls <- census |>
 
 # Join everything
 nb_data <- panel |>
-  left_join(master_new, by = c("tract", "year", "shift")) |>
+  left_join(master_new, by = c("tract", "year", "month")) |>
   mutate(
     # If crime count is NA, convert to zero
     total_crimes    = replace_na(total_crimes, 0),
@@ -272,12 +272,12 @@ nb_data <- panel |>
     property_crimes = replace_na(property_crimes, 0)
   ) |>
   # Select relevant columns
-  dplyr::select(tract, year, shift, total_crimes, violent_crimes, property_crimes, nearest_station) |>
+  dplyr::select(tract, year, month, total_crimes, violent_crimes, property_crimes, nearest_station) |>
   left_join(tract_proximity_to_metro, by = "tract") |>
   left_join(census_controls |> arrange(tract), by = c("tract", "year")) |>
   mutate(
     year      = factor(year),
-    shift     = factor(shift),
+    month     = factor(month),
     red_line    = as.integer(str_detect(tolower(line), "red")),
     green_line  = as.integer(str_detect(tolower(line), "green")),
     yellow_line = as.integer(str_detect(tolower(line), "yellow")),
@@ -294,7 +294,7 @@ nb_data <- panel |>
 
 ```{r}
 # TABLE 1
-table1(~ ., data = nb_data |> dplyr::select(-c(tract, shift, year, total_crimes, nearest_station, name, nearest_station_id, line)),
+table1(~ ., data = nb_data |> dplyr::select(-c(tract, month, year, total_crimes, nearest_station, name, nearest_station_id, line)),
        digits = 8,
        render.continuous = c(. = "Mean (SD)[min, max]"))
 ```
@@ -302,7 +302,7 @@ table1(~ ., data = nb_data |> dplyr::select(-c(tract, shift, year, total_crimes,
 
 ```{r}
 # Write finalized dataset to a CSV file
-# write_csv(nb_data, "nb_data_by_shift.csv")
+# write_csv(nb_data, "nb_data.csv")
 ```
 
 
